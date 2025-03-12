@@ -1,10 +1,10 @@
 CC              = gcc
 CPP             = g++
-DEFS           += -DHAVE_LIBNCURSESW -DHAVE_NCURSES_H -DDEFAULT_PULSE
+DEFS           += -DHAVE_LIBNCURSESW -DHAVE_NCURSES_H -DDEFAULT_PULSE -DWEB_RTC_API_VERION=0
 CFLAGS          = -O2 -Wall
 IDIR            = -I. -I/usr/include/webrtc_audio_processing
-#LIBS            = $$(pkg-config --libs speexdsp) $$(pkg-config --libs webrtc-audio-processing) -lncursesw -lgmp -logg -lopus -lasound -lm
-LIBS            = -lspeexdsp -lwebrtc_audio_processing -lncursesw -lgmp -logg -lopus -lasound -lm
+LIBS            = $$(pkg-config --libs speexdsp) $$(pkg-config --libs webrtc-audio-processing) -lncursesw -lgmp -logg -lopus -lasound -lm
+#LIBS            = -lspeexdsp -lwebrtc_audio_processing -lncursesw -lgmp -logg -lopus -lasound -lm
 LDFLAGS         = -s
 
 

@@ -4,8 +4,10 @@ required build packages:
   libncurses-dev libgmp-dev libwebrtc-audio-processing-dev libspeexdsp-dev libopus-dev libogg-dev libasound2-dev
 
 compile steps:
-  1. adjust DEFS = -DHAVE_LIBNCURSESW -DHAVE_NCURSES_H -DDEFAULT_PULSE in Makefile to your needs
+  1. adjust DEFS = -DHAVE_LIBNCURSESW -DHAVE_NCURSES_H -DDEFAULT_PULSE -DWEB_RTC_API_VERION=0 in Makefile to fit your needs
   2. make
+
+Since webRtc AudioProcessing module does not provide a stable public API you have to set WEB_RTC_API_VERION correctly. Tested so far with webrtc-audio-processing-0.3.1(WEB_RTC_API_VERION=0) and webrtc-audio-processing-2.1(WEB_RTC_API_VERION=2)
 
 The following cmdline options has been added:
   -E algo        set AEC algorithm
@@ -20,6 +22,6 @@ Command added:
 Internal audio format changed to : 16000Hz, 2 channels, s16_le
 Initial cipher type changed to   : twofish 256bit (pc-engine.c @L1539)
 
-The Speex filter length should be set to around 200-500ms. It is necessary to estimate the webRTC MIC-SPEAKER latency. Seren loopback mode (command /l) can help.
+The Speex filter length should be set to around 200-500ms. It is necessary to set correct webRtc MIC-SPEAKER latency. Seren loopback mode (command /l) can help with estimation.
 
 Enjoy the echo free voice chat:)
