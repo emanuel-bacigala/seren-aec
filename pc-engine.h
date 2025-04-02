@@ -32,9 +32,6 @@
 #include "slist.h"
 #include "dhm.h"
 
-extern const unsigned int samplerate;
-extern const unsigned int channels;
-
 /* engine version */
 #define PC_ENGINE_VERSION_BYTES    3
 #define PC_ENGINE_VERSION_MAJOR    0
@@ -48,21 +45,14 @@ extern const unsigned int channels;
 /* maximum number of nodes of the network (excluding our node) */
 #define MAX_NUMBER_OF_NODES 9
 
-/* node timeout (in units of 20ms): if we don't receive packets from a node
- * for more than TIMEOUT/50 seconds, then that node will be deleted.
+/* node timeout (in units of period_time[ms]): if we don't receive packets from a node
+ * for more than TIMEOUT*period_time[s] seconds, then that node will be deleted.
  */
-#define TIMEOUT             300
+#define TIMEOUT             600
 
-/* one opus audio frame is 20ms at 48kHz. Note that 960 are alsa frames,
- * and need to be multiplied by channels to get the number of samples.
- */
-//#define ONE_OPUS_FRAME      960 // pre 48kHz a 20ms
-//#define ONE_OPUS_FRAME      480 // pre 24kHz a 20ms
-#define ONE_OPUS_FRAME      320 // pre 16kHz a 20ms
-//#define ONE_OPUS_FRAME      160 // pre 16kHz a 10ms
-//#define ONE_OPUS_FRAME      640 // pre 16kHz a 40ms
-//#define ONE_OPUS_FRAME      240 // pre 12kHz a 20ms
-
+#define CHANNELS            2
+#define SAMPLERATE          16000            // opus supports: 8000 12000 16000 24000 48000; webRTC supports: 8000 16000 32000 48000
+#define ONE_OPUS_FRAME      (SAMPLERATE/100) // 10ms frames
 
 /* events created by the engine */
 enum pc_event_type {

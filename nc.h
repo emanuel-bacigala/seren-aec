@@ -25,6 +25,7 @@
 #ifdef HAVE_LIBNCURSESW
 #include <stddef.h>
 #include <time.h>
+#include "pc-engine.h"
 
 #if defined(HAVE_NCURSESW_NCURSES_H)
 #include <ncursesw/ncurses.h>
@@ -86,7 +87,7 @@ void nc_print_wlinebuf(const char *nick);
 void nc_update_linebuf(void);
 void nc_status(int micmute, int record, int mode, float peak_percent, double dBSPL,
                const char *timer_str, const char *stat_str);
-void nc_nodelist(unsigned int nb_nodes, int mode, struct nc_node_info ni[]);
+void nc_nodelist(struct pc_context* pctx, unsigned int nb_nodes, int mode, struct nc_node_info ni[]);
 
 #endif /* defined(HAVE_LIBNCURSESW) */
 

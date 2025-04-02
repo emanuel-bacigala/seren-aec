@@ -56,12 +56,6 @@ int16_t* nearData = NULL;
 int16_t* ecData   = NULL;
 /* AEC */
 
-//const unsigned int samplerate  = 12000;
-const unsigned int samplerate  = 16000;
-//const unsigned int samplerate  = 24000;
-//const unsigned int samplerate  = 48000;
-const unsigned int channels    = 2;
-
 const char * const pc_algo_name[] = {
 	"XTEA",
 	"CAST5",
@@ -125,7 +119,7 @@ static struct pc_caller *caller_push(struct slist **callers, struct sockaddr_in 
 	cl->algo    = algo;
 	cl->pklen   = pklen;
 	memcpy(cl->pk, pk, pklen);
-	cl->timeout = 250; /* 5s */
+	cl->timeout = 500; /* 5s */
 	*callers = slist_append(*callers, cl);
 
 	return cl;
@@ -237,7 +231,7 @@ static int node_add(struct pc_node *nodes[], struct sockaddr_in addr, const char
 	nodes[idx]->timeout              = TIMEOUT;
 
 	/* create decoder state */
-	nodes[idx]->dec = opus_decoder_create((opus_int32)samplerate, (int)channels, &error);
+	nodes[idx]->dec = opus_decoder_create(SAMPLERATE, CHANNELS, &error);
 	if (error != OPUS_OK) {
 		free(nodes[idx]);
 		nodes[idx] = NULL;
@@ -839,7 +833,7 @@ static int process_packet(struct pc_context *pctx, const struct udp_packet *udp_
 
 				cl = caller_is_present(pctx->callers, udp_packet->addr);
 				if (cl) {
-					cl->timeout = 250;
+					cl->timeout = 500; /* 5s */
 				} else {
 					/* push caller */
 					caller_push(&pctx->callers, udp_packet->addr, (const char *)nick, pgid, algo, pklen, pk);
@@ -1055,9 +1049,20 @@ static int process_packet(struct pc_context *pctx, const struct udp_packet *udp_
 				return RES_ERROR;
 			}
 
-			/* limit queue length to 500ms */
+			/* limit queue length to 25 pcm frames */
 			if (nodes[idx]->nb_frames >= 25) {
-				free(pf);
+				//free(pf);
+				int i=0;
+				while (nodes[idx]->pcmframes->next) {
+					struct pc_pcmframe *head = (struct pc_pcmframe *)nodes[idx]->pcmframes;
+					nodes[idx]->pcmframes = nodes[idx]->pcmframes->next;
+					free(head);
+					i++;
+				}
+				nodes[idx]->pcmframes = slist_append(nodes[idx]->pcmframes, pf);
+				nodes[idx]->nb_frames = 2;
+				snprintf(msgbuf, MBS, "%u pcm frames discarded from node %s", i, nodes[idx]->nick);
+				msgbook_enqueue(&mb0, MB_TYPE_DEBUG, MODULE, msgbuf);
 			} else {
 				/* add one opus frame to the tail of the queue */
 				nodes[idx]->pcmframes = slist_append(nodes[idx]->pcmframes, pf);
@@ -1239,6 +1244,7 @@ static void pc_engine_aec_far_end(struct pc_context *pctx) {
 
         speex_aecProcessFarEnd();
     } else if (pctx->aec_type == 2) {
+#if 0  // 20ms frames
         for (i = 0; i < ONE_OPUS_FRAME/2; i++)  // copy 1st half (160 samples, 10ms) only to EC
             farData[i] = (int16_t)((pctx->pcm[2*i] + pctx->pcm[2*i + 1])>>1);
 
@@ -1246,7 +1252,11 @@ static void pc_engine_aec_far_end(struct pc_context *pctx) {
 
         for (i = ONE_OPUS_FRAME/2; i < ONE_OPUS_FRAME; i++) // copy 2nd half (160 samples, 10ms) to EC
             farData[i - ONE_OPUS_FRAME/2] = (int16_t)((pctx->pcm[2*i] + pctx->pcm[2*i + 1])>>1);
+#else  // 10ms frames
+        for (i = 0; i < ONE_OPUS_FRAME; i++)
+            farData[i] = (int16_t)((pctx->pcm[2*i] + pctx->pcm[2*i + 1])>>1);
 
+#endif
         webRTC_aecProcessFarEnd();
     }
 }
@@ -1277,6 +1287,7 @@ static void pc_engine_aec_near_end(struct pc_context *pctx) {
             //pctx->lb_pcm[2*i] = pctx->lb_pcm[2*i + 1] = nearData[i]; // avoid EC
         }
     } else if (pctx->aec_type == 2) {
+#if 0  // 20ms frames
         for (i = 0; i < ONE_OPUS_FRAME/2; i++)  // copy 1st half (160 samples, 10ms) mono signal to EC
             nearData[i] = (int16_t)((pctx->lb_pcm[2*i] + pctx->lb_pcm[2*i + 1])>>1);
 
@@ -1292,6 +1303,17 @@ static void pc_engine_aec_near_end(struct pc_context *pctx) {
 
         for (i = ONE_OPUS_FRAME/2 ; i < ONE_OPUS_FRAME; i++) // copy result 2nd half
             pctx->lb_pcm[2*i] = pctx->lb_pcm[2*i + 1] = nearData[i - ONE_OPUS_FRAME/2];
+#else  // 10ms frames
+        for (i = 0; i < ONE_OPUS_FRAME; i++) { // copy mono signal to EC
+            nearData[i] = (int16_t)((pctx->lb_pcm[2*i] + pctx->lb_pcm[2*i + 1])>>1);
+        }
+
+        webRTC_aecProcessNearEnd(pctx->aec_param);
+
+        for (i = 0; i < ONE_OPUS_FRAME; i++) { // copy result
+            pctx->lb_pcm[2*i] = pctx->lb_pcm[2*i + 1] = nearData[i]; // avoid EC
+        }
+#endif
     }
 }
 /* AEC */
@@ -1311,7 +1333,7 @@ static unsigned int mix_audio(struct pc_context *pctx)
 	} else {
 		n++;
 
-		adsp_sum_s32_s16(pcm32, pctx->tone.pcm + channels * pctx->tone.pos, channels * ONE_OPUS_FRAME);
+		adsp_sum_s32_s16(pcm32, pctx->tone.pcm + CHANNELS * pctx->tone.pos, CHANNELS * ONE_OPUS_FRAME);
 		pctx->tone.pos += ONE_OPUS_FRAME;
 	}
 
@@ -1321,7 +1343,7 @@ static unsigned int mix_audio(struct pc_context *pctx)
 		if (pctx->calltone.pos >= pctx->calltone.pcmlen)
 			pctx->calltone.pos = 0;
 
-		adsp_sum_s32_s16(pcm32, pctx->calltone.pcm + channels * pctx->calltone.pos, channels * ONE_OPUS_FRAME);
+		adsp_sum_s32_s16(pcm32, pctx->calltone.pcm + CHANNELS * pctx->calltone.pos, CHANNELS * ONE_OPUS_FRAME);
 		pctx->calltone.pos += ONE_OPUS_FRAME;
 	} else {
 		pctx->calltone.pos = 0;
@@ -1333,7 +1355,7 @@ static unsigned int mix_audio(struct pc_context *pctx)
 		if (pctx->ringtone.pos >= pctx->ringtone.pcmlen)
 			pctx->ringtone.pos = 0;
 
-		adsp_sum_s32_s16(pcm32, pctx->ringtone.pcm + channels * pctx->ringtone.pos, channels * ONE_OPUS_FRAME);
+		adsp_sum_s32_s16(pcm32, pctx->ringtone.pcm + CHANNELS * pctx->ringtone.pos, CHANNELS * ONE_OPUS_FRAME);
 		pctx->ringtone.pos += ONE_OPUS_FRAME;
 	} else {
 		pctx->ringtone.pos = 0;
@@ -1348,13 +1370,13 @@ static unsigned int mix_audio(struct pc_context *pctx)
 			pf = pctx->nodes[i]->pcmframes->data;
 
 			/* dBSPL */
-			pctx->nodes[i]->sos   += adsp_sum_of_squares(pf->pcm, channels * pf->pcmlen);
-			pctx->nodes[i]->sos_N += channels * pf->pcmlen;
+			pctx->nodes[i]->sos   += adsp_sum_of_squares(pf->pcm, CHANNELS * pf->pcmlen);
+			pctx->nodes[i]->sos_N += CHANNELS * pf->pcmlen;
 			rms2 = (double)(pctx->nodes[i]->sos) / (double)pctx->nodes[i]->sos_N;
 			pctx->nodes[i]->dBSPL = 10.0 * log10(1.0 /* to avoid -inf */ + rms2) - 90.3 /* 20*log10(1/32768.0) */;
 
 			/* sum (mix) pcm from different nodes */
-			adsp_sum_s32_s16(pcm32, pf->pcm, channels * pf->pcmlen);
+			adsp_sum_s32_s16(pcm32, pf->pcm, CHANNELS * pf->pcmlen);
 
 			/* remove one opus frame from the head of the queue */
 			free(pf);
@@ -1367,25 +1389,25 @@ static unsigned int mix_audio(struct pc_context *pctx)
 	if (pctx->lb) {
 		m++;
 
-		adsp_sum_s32_s16(pcm32, pctx->lb_pcm, channels * ONE_OPUS_FRAME);
+		adsp_sum_s32_s16(pcm32, pctx->lb_pcm, CHANNELS * ONE_OPUS_FRAME);
 	}
 
 	if (n+m) {
 #if 1
-		peak = adsp_find_peak_s32_2ch(pcm32, channels * ONE_OPUS_FRAME);
+		peak = adsp_find_peak_s32_2ch(pcm32, CHANNELS * ONE_OPUS_FRAME);
 		gain = (float)(INT16_MAX) / (float)peak;
 
 		if (gain < 1.0f) {
-			adsp_scale_s16_s32(pctx->pcm, pcm32, channels * ONE_OPUS_FRAME, gain);     /* ZAPIS VYSLEDKU DO vyst. buffra */
+			adsp_scale_s16_s32(pctx->pcm, pcm32, CHANNELS * ONE_OPUS_FRAME, gain);     /* ZAPIS VYSLEDKU DO vyst. buffra */
 			if (*pctx->verbose >= 3) {
 				snprintf(msgbuf, MBS, "Scale, gain = %.4f", gain);
 				msgbook_enqueue(&mb0, MB_TYPE_DEBUG, MODULE, msgbuf);
 			}
 		} else {
-			adsp_copy_s16_s32(pctx->pcm, pcm32, channels * ONE_OPUS_FRAME);            /* ZAPIS VYSLEDKU DO vyst. buffra */
+			adsp_copy_s16_s32(pctx->pcm, pcm32, CHANNELS * ONE_OPUS_FRAME);            /* ZAPIS VYSLEDKU DO vyst. buffra */
 		}
 #else
-		adsp_compress_tanh_s16_s32(pctx->pcm, pcm32, channels * ONE_OPUS_FRAME);
+		adsp_compress_tanh_s16_s32(pctx->pcm, pcm32, CHANNELS * ONE_OPUS_FRAME);
 #endif
 		pctx->pcmlen = ONE_OPUS_FRAME;
 	} else {
@@ -1394,21 +1416,21 @@ static unsigned int mix_audio(struct pc_context *pctx)
 
 	if (pctx->record || pctx->fifo) {
 		if (!m)
-			adsp_sum_s32_s16(pcm32, pctx->lb_pcm, channels * ONE_OPUS_FRAME);
+			adsp_sum_s32_s16(pcm32, pctx->lb_pcm, CHANNELS * ONE_OPUS_FRAME);
 
-		peak = adsp_find_peak_s32_2ch(pcm32, channels * ONE_OPUS_FRAME);
+		peak = adsp_find_peak_s32_2ch(pcm32, CHANNELS * ONE_OPUS_FRAME);
 		gain = (float)(INT16_MAX) / (float)peak;
 
 		if (gain < 1.0f) {
-			adsp_scale_s16_s32(pctx->record_pcm, pcm32, channels * ONE_OPUS_FRAME, gain);
+			adsp_scale_s16_s32(pctx->record_pcm, pcm32, CHANNELS * ONE_OPUS_FRAME, gain);
 		} else {
-			adsp_copy_s16_s32(pctx->record_pcm, pcm32, channels * ONE_OPUS_FRAME);
+			adsp_copy_s16_s32(pctx->record_pcm, pcm32, CHANNELS * ONE_OPUS_FRAME);
 		}
 
 		/* write data to file */
 		if (pctx->record) {
 			if (pctx->record == REC_WAVE) {
-				wave_write_data(pctx->record_pcm, channels, ONE_OPUS_FRAME, &pctx->record_bytes_written, pctx->record_fp);
+				wave_write_data(pctx->record_pcm, CHANNELS, ONE_OPUS_FRAME, &pctx->record_bytes_written, pctx->record_fp);
 			} else {
 				oggopus_write_data(pctx->record_pcm, ONE_OPUS_FRAME, pctx->record_enc, &pctx->record_oss,
 					               &pctx->record_packetno, 0, pctx->record_fp);
@@ -1429,7 +1451,7 @@ static unsigned int mix_audio(struct pc_context *pctx)
 			if (pctx->fifooutfd != -1) {
 				ssize_t nw;
 
-				nw = write(pctx->fifooutfd, pctx->record_pcm, sizeof(pctx->record_pcm[0]) * channels * ONE_OPUS_FRAME);
+				nw = write(pctx->fifooutfd, pctx->record_pcm, sizeof(pctx->record_pcm[0]) * CHANNELS * ONE_OPUS_FRAME);
 				if (nw == -1) {
 					if (errno == EPIPE) {
 						int ret;
@@ -1597,7 +1619,7 @@ int pc_engine_init(struct pc_context *pctx, const char *nick, uint16_t local_por
 	fd_idx_audiocapture = *nfds;
 	pctx->audiodevice_capture = pctx->audiodevice_capture ? pctx->audiodevice_capture : pctx->audiodevice_playback;
 	ret = audio_init(&pctx->ad_capture, pctx->audiodevice_capture, SND_PCM_STREAM_CAPTURE,
-	                 samplerate, channels, pfds+*nfds, pctx->verbose);
+	                 SAMPLERATE, CHANNELS, pfds+*nfds, pctx->verbose);
 	if (ret == -1)
 		return -1;
 	*nfds += pctx->ad_capture.nfds;
@@ -1605,7 +1627,7 @@ int pc_engine_init(struct pc_context *pctx, const char *nick, uint16_t local_por
 	/* init alsa audio playback */
 	fd_idx_audioplayback = *nfds;
 	ret = audio_init(&pctx->ad_playback, pctx->audiodevice_playback, SND_PCM_STREAM_PLAYBACK,
-	                 samplerate, channels, pfds+*nfds, pctx->verbose);
+	                 SAMPLERATE, CHANNELS, pfds+*nfds, pctx->verbose);
 	if (ret == -1)
 		return -1;
 	/* we won't poll this device */
@@ -1644,7 +1666,7 @@ int pc_engine_init(struct pc_context *pctx, const char *nick, uint16_t local_por
 
 	/* create encoder state */
 	logstr(opus_get_version_string());
-	pctx->enc = opus_encoder_create((opus_int32)samplerate, (int)channels, OPUS_APPLICATION_VOIP, &error);
+	pctx->enc = opus_encoder_create(SAMPLERATE, CHANNELS, OPUS_APPLICATION_VOIP, &error);
 	if (error != OPUS_OK) {
 		snprintf(msgbuf, MBS, "opus error: %s", opus_strerror(error));
 		goto engine_setup_fail;
@@ -1693,9 +1715,9 @@ int pc_engine_init(struct pc_context *pctx, const char *nick, uint16_t local_por
 	}
 
 	/* generate tones */
-	tones_generate_tone(&pctx->tone, samplerate, channels, ONE_OPUS_FRAME);
-	tones_generate_calltone(&pctx->calltone, samplerate, channels, ONE_OPUS_FRAME);
-	tones_generate_ringtone(&pctx->ringtone, 3, samplerate, channels, ONE_OPUS_FRAME);
+	tones_generate_tone(&pctx->tone, SAMPLERATE, CHANNELS, ONE_OPUS_FRAME);
+	tones_generate_calltone(&pctx->calltone, SAMPLERATE, CHANNELS, ONE_OPUS_FRAME);
+	tones_generate_ringtone(&pctx->ringtone, 3, SAMPLERATE, CHANNELS, ONE_OPUS_FRAME);
 
 	return 0;
 
@@ -1990,11 +2012,13 @@ void pc_engine_step(struct pc_context *pctx)
 	/* connect packets or table packets might have gotten lost, so every
 	   1s send out call requests to those who don't know about me,
 	   eventually using relay to make sure packets get delivered */
-	if ((1 + pctx->ic_talk + pctx->ic_mute) % 50 == 0)
+//	if ((1 + pctx->ic_talk + pctx->ic_mute) % 50 == 0)
+	if ((1 + pctx->ic_talk + pctx->ic_mute) % (1000000 / pctx->ad_capture.period_time) == 0)
 		connect_new_nodes(pctx, 0);
 
 	/* send telemetry, every 10s */
-	if (pctx->telemetry && (1 + pctx->ic_total) % (10*50) == 0) {
+//	if (pctx->telemetry && (1 + pctx->ic_total) % (10*50) == 0) {
+	if (pctx->telemetry && (1 + pctx->ic_total) % (10*(1000000 / pctx->ad_capture.period_time)) == 0) {
 		for (i = 0; i < MAX_NUMBER_OF_NODES; i++) {
 			if (pctx->nodes[i] && pctx->nodes[i]->status == STATUS_OK) {
 				uint32_t pl10k;
@@ -2010,7 +2034,8 @@ void pc_engine_step(struct pc_context *pctx)
 	}
 
 	/* send rtt request, every 2s */
-	if (pctx->rtt && (1 + pctx->ic_total) % (2*50) == 0) {
+//	if (pctx->rtt && (1 + pctx->ic_total) % (2*50) == 0) {
+	if (pctx->rtt && (1 + pctx->ic_total) % (2*(1000000 / pctx->ad_capture.period_time)) == 0) {
 		for (i = 0; i < MAX_NUMBER_OF_NODES; i++) {
 			if (pctx->nodes[i] && pctx->nodes[i]->status == STATUS_OK) {
 				struct udp_packet udp_packet;
@@ -2023,7 +2048,8 @@ void pc_engine_step(struct pc_context *pctx)
 	}
 
 	/* update stats */
-	if (pctx->ic_total % 50 == 0) {
+//	if (pctx->ic_total % 50 == 0) {
+	if (pctx->ic_total % (1000000 / pctx->ad_capture.period_time) == 0) {
 		pctx->packets_received_g = 0;
 		pctx->packets_lost_g     = 0;
 		for (i = 0; i < MAX_NUMBER_OF_NODES; i++) {
@@ -2112,21 +2138,21 @@ void pc_engine_audio_ready(struct pc_context *pctx)
 			}
 #endif
 			if (nr > 0)
-				adsp_sum_and_clip_s16_s16(pctx->lb_pcm, fifo_pcm, channels * pctx->lb_pcmlen);
+				adsp_sum_and_clip_s16_s16(pctx->lb_pcm, fifo_pcm, CHANNELS * pctx->lb_pcmlen);
 		}
 
 		/* amplify if necessary */
 		if (pctx->micgain_dB != 0.0f)
-			adsp_scale_and_clip_s16_s16(pctx->lb_pcm, channels * pctx->lb_pcmlen, powf(10.0f, pctx->micgain_dB/20.0f));
+			adsp_scale_and_clip_s16_s16(pctx->lb_pcm, CHANNELS * pctx->lb_pcmlen, powf(10.0f, pctx->micgain_dB/20.0f));
 
 		/* find peak in captured audio */
-		ipeak = adsp_find_peak_s16_2ch(pctx->lb_pcm, channels * pctx->lb_pcmlen);
+		ipeak = adsp_find_peak_s16_2ch(pctx->lb_pcm, CHANNELS * pctx->lb_pcmlen);
 		peak_percent = 100.0f * (float)ipeak / (float)(INT16_MAX+1);
 		pctx->peak_percent = (pctx->peak_percent < peak_percent) ? peak_percent : pctx->peak_percent;
 
 		/* dBSPL */
-		pctx->sos   += adsp_sum_of_squares(pctx->lb_pcm, channels * pctx->lb_pcmlen);
-		pctx->sos_N += channels * pctx->lb_pcmlen;
+		pctx->sos   += adsp_sum_of_squares(pctx->lb_pcm, CHANNELS * pctx->lb_pcmlen);
+		pctx->sos_N += CHANNELS * pctx->lb_pcmlen;
 		rms2 = (double)(pctx->sos) / (double)pctx->sos_N;
 		pctx->dBSPL = 10.0 * log10(1.0 /* to avoid -inf */ + rms2) - 90.3 /* 20*log10(1/32768.0) */;
 	} else {
@@ -2143,7 +2169,8 @@ void pc_engine_audio_ready(struct pc_context *pctx)
 		struct udp_packet udp_packet;
 
 		if (pctx->micmute) {
-			if ((1+pctx->ic_total) % 50 == 0) { /* nop packets only every 1s */
+//			if ((1+pctx->ic_total) % 50 == 0) { /* nop packets only every 1s */
+			if ((1+pctx->ic_total) % (1000000 / pctx->ad_capture.period_time) == 0) { /* nop packets only every 1s */
 				/* forge udp nop packet */
 				packet_nop(&udp_packet, pctx->mode);
 
@@ -2310,12 +2337,12 @@ void pc_engine_cmd_print_info(struct pc_context *pctx)
 		size_t l;
 		if (pctx->nodes[i]) {
 			l = strlen(msgbuf);
-			snprintf(msgbuf+l, MBS-l, "\n    %u:%15s:%-5hu %12s  pl[l%.2f%% t%.2f%%]  rtt[%3.0fms]  pcm[%3ums]  %+.0fdB%s",
+			snprintf(msgbuf+l, MBS-l, "\n    %u:%15s:%-5hu %12s  pl[rx=%.2f%% tx=%.2f%%]  rtt[%3.0fms]  pcm[%3ums]  %+.0fdB%s",
 			         i, inet_ntoa(pctx->nodes[i]->addr.sin_addr),
 			         ntohs(pctx->nodes[i]->addr.sin_port), pctx->nodes[i]->nick,
 			         pctx->nodes[i]->packet_loss, (float)pctx->nodes[i]->tm_pl10k / 10000.0f,
 			         pctx->nodes[i]->rtt_us * 0.001,
-			         20 * pctx->nodes[i]->nb_frames,
+			         (pctx->ad_capture.period_time/1000) * pctx->nodes[i]->nb_frames,
 			         (float)pctx->nodes[i]->gain_Q8_dB / 256.0f,
 			         pctx->nodes[i]->nb_frames ? "" : "  MUTE");
 		}
@@ -2351,16 +2378,17 @@ int pc_engine_cmd_set_echocancel(struct pc_context *pctx, int type, int param)
             }
 
             if (type == 1) {
-                speex_aecInit(samplerate, ONE_OPUS_FRAME, (unsigned)param, &farData, &nearData, &ecData);
+                speex_aecInit(SAMPLERATE, ONE_OPUS_FRAME, (unsigned)param, &farData, &nearData, &ecData);
                 if (*pctx->verbose >= 2) {
                     snprintf(msgbuf, MBS, "speex AEC initialized: freq=%dHz block_len=%d(%dms) filter_len=%d(%dms)",
-                             samplerate, ONE_OPUS_FRAME, 1000*ONE_OPUS_FRAME/samplerate, param, 1000*param/samplerate);
+                             SAMPLERATE, ONE_OPUS_FRAME, 1000*ONE_OPUS_FRAME/SAMPLERATE, param, 1000*param/SAMPLERATE);
                     msgbook_enqueue(&mb0, MB_TYPE_DEBUG, MODULE, msgbuf);
                 }
             } else if (type == 2) {
-                webRTC_aecInit(samplerate, &farData, &nearData);
+                webRTC_aecInit(SAMPLERATE, &farData, &nearData);
                 if (*pctx->verbose >= 2) {
-                    snprintf(msgbuf, MBS, "webRTC AEC initialized: freq=%dHz latency=%dms", samplerate, param);
+                    snprintf(msgbuf, MBS, "webRTC AEC initialized: freq=%dHz block_len=%d(%dms) latency=%dms",
+                             SAMPLERATE, ONE_OPUS_FRAME, 1000*ONE_OPUS_FRAME/SAMPLERATE, param);
                     msgbook_enqueue(&mb0, MB_TYPE_DEBUG, MODULE, msgbuf);
                 }
             }
@@ -2453,10 +2481,10 @@ int pc_engine_cmd_toggle_recording(struct pc_context *pctx, int rec_format)
 
 		if (rec_format == REC_WAVE) {
 			strcat(pctx->record_filename, ".wav");
-			pctx->record_fp = wave_start_recording(pctx->record_filename, samplerate, channels);
+			pctx->record_fp = wave_start_recording(pctx->record_filename, SAMPLERATE, CHANNELS);
 		} else {
 			strcat(pctx->record_filename, ".opus");
-			pctx->record_fp = oggopus_start_recording(pctx->record_filename, samplerate, channels,
+			pctx->record_fp = oggopus_start_recording(pctx->record_filename, SAMPLERATE, CHANNELS,
 			                                          &pctx->record_enc, &pctx->record_oss);
 		}
 

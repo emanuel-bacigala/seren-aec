@@ -395,7 +395,7 @@ void nc_status(int micmute, int record, int mode, float peak_percent, double dBS
 	doupdate();
 }
 
-void nc_nodelist(unsigned int nb_nodes, int mode, struct nc_node_info ni[])
+void nc_nodelist(struct pc_context *pctx, unsigned int nb_nodes, int mode, struct nc_node_info ni[])
 {
 	unsigned int i;
 	const char * const algo_name[] = {
@@ -433,7 +433,7 @@ void nc_nodelist(unsigned int nb_nodes, int mode, struct nc_node_info ni[])
 					ni[i].algo = 4;
 				current_algo = mode == 0 ? algo_name[6] :
 				              (mode == 1 ? algo_name[ni[i].algo] : algo_name[ni[0].algo]);
-				wprintw(nctx.win_nodelist, " %s %3.0f/%3u\n ", current_algo, ni[i].rtt_us * 0.001, ni[i].nb_frames*20);
+				wprintw(nctx.win_nodelist, " %s %3.0f/%3u\n ", current_algo, ni[i].rtt_us * 0.001, ni[i].nb_frames*(pctx->ad_capture.period_time/1000));
 
 				waddch(nctx.win_nodelist, ACS_VLINE);
 				wprintw(nctx.win_nodelist, " %2ukHz %s\n ", ni[i].bandwidth/1000, ni[i].nb_channels == 2 ? "stereo" : " mono ");

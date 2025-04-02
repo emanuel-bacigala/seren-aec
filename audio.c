@@ -43,8 +43,7 @@ int audio_init(struct audio_data *ad, const char *device, snd_pcm_stream_t strea
 /*	ad->period_size     = */
 
 // Opus can encode frames of 2.5, 5, 10, 20, 40, or 60 ms. (https://tools.ietf.org/html/rfc6716)
-	ad->period_time     = 20000; //@16kHz -> 320 samples
-//	ad->period_time     = 20000; //@24Hz -> 480 samples
+	ad->period_time     = 10000; // 10ms frames
 
 /*	ad->buffer_size     = */
 /*	ad->buffer_time     = */
@@ -94,30 +93,36 @@ int audio_init(struct audio_data *ad, const char *device, snd_pcm_stream_t strea
 	if ((err = snd_pcm_hw_params_set_format(ad->pcm_handle, ad->hw_params, ad->format)) < 0) {
 		snprintf(msgbuf, MBS, "Cannot set sample format to %d (%s)", ad->format, snd_strerror(err));
  	        msgbook_enqueue(&mb0, MB_TYPE_WARNING, MODULE, msgbuf);
-		//goto fail;
+		goto fail;
 	}
 	if ((err = snd_pcm_hw_params_set_rate(ad->pcm_handle, ad->hw_params, ad->rate, 0)) < 0) {
 		snprintf(msgbuf, MBS, "Cannot set sample rate to %d (%s)", ad->rate, snd_strerror(err));
  	        msgbook_enqueue(&mb0, MB_TYPE_WARNING, MODULE, msgbuf);
-		//goto fail;
+		goto fail;
 	}
 	if ((err = snd_pcm_hw_params_set_channels(ad->pcm_handle, ad->hw_params, ad->channels)) < 0) {
 		snprintf(msgbuf, MBS, "Cannot set channel count to %d (%s)", ad->channels, snd_strerror(err));
  	        msgbook_enqueue(&mb0, MB_TYPE_WARNING, MODULE, msgbuf);
-		//goto fail;
+		goto fail;
 	}
-
 	if ((err = snd_pcm_hw_params_set_period_time(ad->pcm_handle, ad->hw_params, ad->period_time, 0)) < 0) {
 		snprintf(msgbuf, MBS, "Cannot set period time to %d (%s)", ad->period_time, snd_strerror(err));
  	        msgbook_enqueue(&mb0, MB_TYPE_WARNING, MODULE, msgbuf);
-		//goto fail;
+		snprintf(msgbuf, MBS, "Retrying with value %d...", 2*ad->period_time);
+		msgbook_enqueue(&mb0, MB_TYPE_DEBUG, MODULE, msgbuf);
+                if (streamtype == SND_PCM_STREAM_PLAYBACK &&
+                    (err = snd_pcm_hw_params_set_period_time(ad->pcm_handle, ad->hw_params, 2*ad->period_time, 0)) < 0) {
+                    snprintf(msgbuf, MBS, "Cannot set period time to %d (%s)", ad->period_time, snd_strerror(err));
+                    msgbook_enqueue(&mb0, MB_TYPE_WARNING, MODULE, msgbuf);
+                    goto fail;
+                }
 	}
 
-#if 1
+#if 1  // zmensi latenciu:)
 	if ((err = snd_pcm_hw_params_set_periods(ad->pcm_handle, ad->hw_params, ad->periods, 0)) < 0 ) {
 		snprintf(msgbuf, MBS, "Cannot set periods to %d (%s)", ad->periods, snd_strerror(err));
  	        msgbook_enqueue(&mb0, MB_TYPE_WARNING, MODULE, msgbuf);
-		//goto fail;
+		goto fail;
 	}
 #endif
 	/* apply hardware parameters to pcm device and prepare device */
@@ -204,11 +209,11 @@ int audio_init(struct audio_data *ad, const char *device, snd_pcm_stream_t strea
 	/* set software parameters */
 	if (*ad->verbose)
 		msgbook_enqueue(&mb0, MB_TYPE_VERBOSE, MODULE, "Setting software parameters...");
-#if 1
+#if 1 // na x86 predlzi latecinu repraku
 	/* playback: if the samples in ring buffer are >= start_threshold, and the stream is not running,
 	             it will be started
 	   capture:  if we try to read a number of frames >= start_threshold, then the stream will be started */
-	ad->start_threshold = 2*ad->period_size;
+	ad->start_threshold = (ad->period_time < 20000 ? 4 : 2)*ad->period_size;
 	if ((err = snd_pcm_sw_params_set_start_threshold(ad->pcm_handle, ad->sw_params, ad->start_threshold)) < 0) {
 		snprintf(msgbuf, MBS, "Cannot set start threshold (%s)", snd_strerror(err));
 		goto fail;

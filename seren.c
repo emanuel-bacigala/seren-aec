@@ -1213,8 +1213,12 @@ int main(int argc, char *argv[])
 					char                stat_str[48];
 					struct nc_node_info ni[MAX_NUMBER_OF_NODES+1];
 
-					snprintf(timer_str, 16, "%02u:%02u:%02u", (pctx.ic_talk+pctx.ic_mute)/180000,
-						     ((pctx.ic_talk+pctx.ic_mute)/3000)%60, ((pctx.ic_talk+pctx.ic_mute)/50)%60);
+//					snprintf(timer_str, 16, "%02u:%02u:%02u", (pctx.ic_talk+pctx.ic_mute)/180000,
+//						     ((pctx.ic_talk+pctx.ic_mute)/3000)%60, ((pctx.ic_talk+pctx.ic_mute)/50)%60);
+					snprintf(timer_str, 16, "%02u:%02u:%02u",
+                                                     (pctx.ic_talk+pctx.ic_mute)/(3600000/(pctx.ad_capture.period_time/1000)),
+						     ((pctx.ic_talk+pctx.ic_mute)/(60000000/pctx.ad_capture.period_time))%60,
+                                                     ((pctx.ic_talk+pctx.ic_mute)/(1000000/pctx.ad_capture.period_time))%60);
 
 					snprintf(stat_str, 48, "%4.1fkB/s↑  %4.1fkB/s↓   pl[%4.2f%%] ",
 						     pctx.bw_upload, pctx.bw_download, pctx.packet_loss_g);
@@ -1224,7 +1228,7 @@ int main(int argc, char *argv[])
 					ni[0].algo        = pctx.algo;
 					ni[0].nb_frames   = pctx.micmute ? 0 : 1;
 					ni[0].bandwidth   = (unsigned int)pctx.bandwidth_hz;
-					ni[0].nb_channels = channels;
+					ni[0].nb_channels = CHANNELS;
 					ni[0].dBSPL       = pctx.dBSPL;
 					for (i = 0; i < MAX_NUMBER_OF_NODES; i++) {
 						if (pctx.nodes[i]) {
@@ -1243,7 +1247,7 @@ int main(int argc, char *argv[])
 					nc_status(pctx.micmute, pctx.record, pctx.mode, pctx.peak_percent, pctx.dBSPL,
 					          timer_str, stat_str);
 
-					nc_nodelist(MAX_NUMBER_OF_NODES+1, pctx.mode, ni);
+					nc_nodelist(&pctx, MAX_NUMBER_OF_NODES+1, pctx.mode, ni);
 				}
 #endif
 
